@@ -12,6 +12,7 @@ import javax.imageio.*;
 import javax.imageio.spi.IIORegistry;
 import java.awt.*;
 import java.awt.image.BufferedImage;
+import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -100,30 +101,42 @@ public class ImageTiler {
 
         if (reader != null) {
 
-            int srcHeight = reader.getHeight(0);
-            int srcWidth = reader.getWidth(0);
+            try {
+                int srcHeight = reader.getHeight(0);
+                int srcWidth = reader.getWidth(0);
 
-            int height = (int) Math.ceil( ((double) reader.getHeight(0)) / ((double) subsample));
-            int rows = (int) Math.ceil( ((double) height) / ((double) _tileSize));
+                int height = (int) Math.ceil( ((double) srcHeight) / ((double) subsample));
+                int rows = (int) Math.ceil( ((double) height) / ((double) _tileSize));
 
-            int stripWidth = _tileSize * subsample * _maxColsPerStrip;
-            int numberOfStrips = (int) Math.ceil( ((double) srcWidth) / ((double) stripWidth));
+                int stripWidth = _tileSize * subsample * _maxColsPerStrip;
+                int numberOfStrips = (int) Math.ceil( ((double) srcWidth) / ((double) stripWidth));
 
-            for (int stripIndex = 0; stripIndex < numberOfStrips; stripIndex++) {
+                for (int stripIndex = 0; stripIndex < numberOfStrips; stripIndex++) {
 
-                int srcStripOffset = stripIndex * stripWidth;
-                if (srcStripOffset > srcWidth) {
-                    continue;
+                    int srcStripOffset = stripIndex * stripWidth;
+                    if (srcStripOffset > srcWidth) {
+                        continue;
+                    }
+
+                    Rectangle stripRect = new Rectangle(srcStripOffset, 0, stripWidth, srcHeight);
+                    ImageReadParam params = reader.getDefaultReadParam();
+                    params.setSourceRegion(stripRect);
+                    params.setSourceSubsampling(subsample, subsample, 0, 0);
+                    BufferedImage strip = reader.read(0, params);
+                    splitStripIntoTiles(strip, levelSink, rows, stripIndex, ioThreadPool);
                 }
-
-                Rectangle stripRect = new Rectangle(srcStripOffset, 0, stripWidth, srcHeight);
-                ImageReadParam params = reader.getDefaultReadParam();
-                params.setSourceRegion(stripRect);
-                params.setSourceSubsampling(subsample, subsample, 0, 0);
-                BufferedImage strip = reader.read(0, params);
-                splitStripIntoTiles(strip, levelSink, rows, stripIndex, ioThreadPool);
+            } finally {
+                var input = reader.getInput();
+                if (input instanceof Closeable) {
+                    try {
+                        ((Closeable) input).close();
+                    } catch (Exception e) {
+                        // ignored
+                    }
+                }
+                reader.dispose();
             }
-            reader.dispose();
+
         } else {
             throw new RuntimeException("No readers found suitable for file");
         }

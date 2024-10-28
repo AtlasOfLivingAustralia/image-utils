@@ -1,5 +1,6 @@
 package au.org.ala.images.metadata;
 
+import au.org.ala.images.util.FastByteArrayInputStream;
 import com.drew.imaging.ImageMetadataReader;
 import com.drew.metadata.Directory;
 import com.drew.metadata.Metadata;
@@ -10,7 +11,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.BufferedInputStream;
-import java.io.ByteArrayInputStream;
 import java.util.Map;
 import java.util.regex.Pattern;
 
@@ -28,7 +28,7 @@ public class ImageMetadataExtractor extends AbstractMetadataParser {
 
     @Override
     public void extractMetadata(byte[] bytes, Map<String, String> md) {
-        BufferedInputStream bis = new BufferedInputStream(new ByteArrayInputStream(bytes));
+        BufferedInputStream bis = new BufferedInputStream(new FastByteArrayInputStream(bytes));
         try {
             Metadata metadata = ImageMetadataReader.readMetadata(bis, bytes.length);
             for (Directory directory : metadata.getDirectories()) {

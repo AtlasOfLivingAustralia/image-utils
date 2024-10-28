@@ -13,8 +13,10 @@ import javax.imageio.ImageReadParam;
 import javax.imageio.ImageReader;
 import java.awt.*;
 import java.awt.image.BufferedImage;
+import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.List;
@@ -35,11 +37,21 @@ public class ImageThumbnailer {
 
         ImageReader reader = ImageReaderUtils.findCompatibleImageReader(imageBytes);
         List<ThumbnailingResult> results = new ArrayList<ThumbnailingResult>();
+
         if (reader != null) {
+            generateThumbnailsInternal(byteSinkFactory, thumbDefs, reader, results);
+        } else {
+            log.error("No image readers for image length {}!", imageBytes.length);
+        }
+        return results;
+    }
+
+    private static void generateThumbnailsInternal(ByteSinkFactory byteSinkFactory, List<ThumbDefinition> thumbDefs, ImageReader reader, List<ThumbnailingResult> results) throws IOException {
+        BufferedImage thumbSrc;
+        try {
             ImageReadParam imageParams = reader.getDefaultReadParam();
             int height = reader.getHeight(0);
             int width = reader.getWidth(0);
-            BufferedImage thumbSrc;
             // Big images need to be thumbed via ImageReader to maintain O(1) heap use
             if (height > MAX_THUMB_SIZE || width > MAX_THUMB_SIZE) {
                 // roughly scale (subsample) the image to a max dimension of 1024
@@ -60,68 +72,75 @@ public class ImageThumbnailer {
                 thumbSrc = reader.read(0);
                 thumbSrc = ImageUtils.scaleWidth(thumbSrc, MAX_THUMB_SIZE);
             }
-
-            if (thumbSrc != null) {
-                for (ThumbDefinition thumbDef : thumbDefs) {
-                    ByteSink destination = byteSinkFactory.getByteSinkForNames(thumbDef.getName());
-                    // workout if we need to be a transparent png or if jpg will do...
-                    Color backgroundColor = thumbDef.getBackgroundColor();
-                    int size = thumbDef.getMaximumDimension();
-                    boolean isPNG = false;
-                    BufferedImage thumbImage;
-
-                    BufferedImage scaledThumb = ImageUtils.scaleWidth(thumbSrc, size);
-                    int thumbHeight = scaledThumb.getHeight();
-                    int thumbWidth = scaledThumb.getWidth();
-
-                    Graphics g = null;
-                    try {
-                        if (!thumbDef.isSquare()) {
-                            // Need to paint anyway, as the source bytes might contain an alpha channel,
-                            // and this is going to JPG with no transparency - this avoids weird colouration effects.
-                            thumbImage = new BufferedImage(scaledThumb.getWidth(), scaledThumb.getHeight(), BufferedImage.TYPE_3BYTE_BGR);
-                            g = thumbImage.getGraphics();
-                            g.drawImage(scaledThumb, 0, 0, null);
-                        } else {
-                            if (backgroundColor == null) {
-                                isPNG = true;
-                                thumbImage = new BufferedImage(size, size, BufferedImage.TYPE_4BYTE_ABGR);
-                                g = thumbImage.getGraphics();
-                            } else {
-                                thumbImage = new BufferedImage(size, size, BufferedImage.TYPE_3BYTE_BGR);
-                                g = thumbImage.getGraphics();
-                                g.setColor(backgroundColor);
-                                g.fillRect(0, 0, size, size);
-                            }
-                            // Draw the non-square image centered on the square target
-                            if (thumbHeight < size) {
-                                int top = (size / 2) - (thumbHeight / 2);
-                                g.drawImage(scaledThumb, 0, top, null);
-                            } else if (thumbWidth < size) {
-                                int left = (size / 2) - (thumbWidth / 2);
-                                g.drawImage(scaledThumb, left, 0, null);
-                            } else {
-                                g.drawImage(scaledThumb, 0, 0, null);
-                            }
-                        }
-                    } finally {
-                        if (g != null) {
-                            g.dispose();
-                        }
-                    }
-
-                    if (thumbImage != null) {
-                        try (OutputStream thumbOutputStream = destination.openStream()) {
-                            ImageIO.write(thumbImage, isPNG ? "PNG" : "JPG", thumbOutputStream);
-                        }
-                        results.add(new ThumbnailingResult(thumbImage.getWidth(), thumbImage.getHeight(), thumbDef.isSquare(), thumbDef.getName()));
-                    }
+        } finally {
+            var input = reader.getInput();
+            if (input instanceof Closeable) {
+                try {
+                    ((Closeable) input).close();
+                } catch (IOException e) {
+                    // ignore
                 }
             }
-        } else {
-            log.error("No image readers for image length {}!", imageBytes.length);
+            reader.dispose();
         }
-        return results;
+
+        if (thumbSrc != null) {
+            for (ThumbDefinition thumbDef : thumbDefs) {
+                ByteSink destination = byteSinkFactory.getByteSinkForNames(thumbDef.getName());
+                // workout if we need to be a transparent png or if jpg will do...
+                Color backgroundColor = thumbDef.getBackgroundColor();
+                int size = thumbDef.getMaximumDimension();
+                boolean isPNG = false;
+                BufferedImage thumbImage;
+
+                BufferedImage scaledThumb = ImageUtils.scaleWidth(thumbSrc, size);
+                int thumbHeight = scaledThumb.getHeight();
+                int thumbWidth = scaledThumb.getWidth();
+
+                Graphics g = null;
+                try {
+                    if (!thumbDef.isSquare()) {
+                        // Need to paint anyway, as the source bytes might contain an alpha channel,
+                        // and this is going to JPG with no transparency - this avoids weird colouration effects.
+                        thumbImage = new BufferedImage(scaledThumb.getWidth(), scaledThumb.getHeight(), BufferedImage.TYPE_3BYTE_BGR);
+                        g = thumbImage.getGraphics();
+                        g.drawImage(scaledThumb, 0, 0, null);
+                    } else {
+                        if (backgroundColor == null) {
+                            isPNG = true;
+                            thumbImage = new BufferedImage(size, size, BufferedImage.TYPE_4BYTE_ABGR);
+                            g = thumbImage.getGraphics();
+                        } else {
+                            thumbImage = new BufferedImage(size, size, BufferedImage.TYPE_3BYTE_BGR);
+                            g = thumbImage.getGraphics();
+                            g.setColor(backgroundColor);
+                            g.fillRect(0, 0, size, size);
+                        }
+                        // Draw the non-square image centered on the square target
+                        if (thumbHeight < size) {
+                            int top = (size / 2) - (thumbHeight / 2);
+                            g.drawImage(scaledThumb, 0, top, null);
+                        } else if (thumbWidth < size) {
+                            int left = (size / 2) - (thumbWidth / 2);
+                            g.drawImage(scaledThumb, left, 0, null);
+                        } else {
+                            g.drawImage(scaledThumb, 0, 0, null);
+                        }
+                    }
+                } finally {
+                    if (g != null) {
+                        g.dispose();
+                    }
+                }
+
+                if (thumbImage != null) {
+                    try (OutputStream thumbOutputStream = destination.openStream()) {
+                        ImageIO.write(thumbImage, isPNG ? "PNG" : "JPG", thumbOutputStream);
+                    }
+                    results.add(new ThumbnailingResult(thumbImage.getWidth(), thumbImage.getHeight(), thumbDef.isSquare(), thumbDef.getName()));
+                }
+            }
+        }
     }
 
 }

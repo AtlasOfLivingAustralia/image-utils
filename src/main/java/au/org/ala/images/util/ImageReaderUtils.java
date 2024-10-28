@@ -30,17 +30,20 @@ public class ImageReaderUtils {
 
         try {
             FastByteArrayInputStream fbis = new FastByteArrayInputStream(imageBytes);
-            ImageInputStream iis = ImageIO.createImageInputStream(fbis);
-            Iterator<ImageReader> iter = ImageIO.getImageReaders(iis);
+            Iterator<ImageReader> iter;
+            try (ImageInputStream iis = ImageIO.createImageInputStream(fbis)) {
+                 iter = ImageIO.getImageReaders(iis);
+            }
             ArrayList<ImageReader> candidates = new ArrayList<ImageReader>();
             while (iter.hasNext()) {
                 ImageReader candidate = iter.next();
                 try {
                     fbis = new FastByteArrayInputStream(imageBytes);
-                    iis = ImageIO.createImageInputStream(fbis);
-                    iis.mark();
-                    candidate.setInput(iis);
-                    int height = candidate.getHeight(0);
+                    try (ImageInputStream iis = ImageIO.createImageInputStream(fbis)) {
+                        iis.mark();
+                        candidate.setInput(iis);
+                        int height = candidate.getHeight(0);
+                    }
                     // if we get here, this reader should work
                     candidates.add(candidate);
                 } catch (Exception ex) {
@@ -83,8 +86,10 @@ public class ImageReaderUtils {
     public static ImageInputStream  rotate(byte[] imageBytes) throws IOException {
 
         try {
-            BufferedInputStream bis = new BufferedInputStream(new ByteArrayInputStream(imageBytes));
-            Metadata metadata = ImageMetadataReader.readMetadata(bis, imageBytes.length);
+            Metadata metadata;
+            try (BufferedInputStream bis = new BufferedInputStream(new FastByteArrayInputStream(imageBytes))) {
+                metadata = ImageMetadataReader.readMetadata(bis, imageBytes.length);
+            }
             Collection<ExifIFD0Directory> exifIFD0 = metadata.getDirectoriesOfType(ExifIFD0Directory.class);
             JpegDirectory jpegDirectory = metadata.getFirstDirectoryOfType(JpegDirectory.class);
 
@@ -139,8 +144,10 @@ public class ImageReaderUtils {
 
             if (orientation > 1 && orientation < 9){
 
-                BufferedInputStream bis2 = new BufferedInputStream(new ByteArrayInputStream(imageBytes));
-                BufferedImage originalImage = ImageIO.read(bis2);
+                BufferedImage originalImage;
+                try (BufferedInputStream bis2 = new BufferedInputStream(new FastByteArrayInputStream(imageBytes))) {
+                    originalImage = ImageIO.read(bis2);
+                }
                 AffineTransformOp affineTransformOp = new AffineTransformOp(affineTransform, AffineTransformOp.TYPE_BILINEAR);
                 BufferedImage destinationImage = new BufferedImage(originalImage.getHeight(), originalImage.getWidth(), originalImage.getType());
                 destinationImage = affineTransformOp.filter(originalImage, destinationImage);

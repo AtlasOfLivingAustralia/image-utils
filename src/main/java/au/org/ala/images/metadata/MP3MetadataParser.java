@@ -1,5 +1,6 @@
 package au.org.ala.images.metadata;
 
+import au.org.ala.images.util.FastByteArrayInputStream;
 import org.apache.tika.metadata.Metadata;
 import org.apache.tika.parser.ParseContext;
 import org.apache.tika.parser.Parser;
@@ -29,7 +30,7 @@ public class MP3MetadataParser extends AbstractMetadataParser {
     @Override
     public void extractMetadata(byte[] bytes, Map<String, String> md) {
         try {
-            InputStream input = new ByteArrayInputStream(bytes);
+            InputStream input = new FastByteArrayInputStream(bytes);
             ContentHandler handler = new DefaultHandler();
             Metadata metadata = new Metadata();
             Parser parser = new Mp3Parser();
