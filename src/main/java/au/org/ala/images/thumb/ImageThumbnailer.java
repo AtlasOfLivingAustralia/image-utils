@@ -5,6 +5,7 @@ import au.org.ala.images.util.FileByteSinkFactory;
 import au.org.ala.images.util.ImageReaderUtils;
 import au.org.ala.images.util.ImageUtils;
 import com.google.common.io.ByteSink;
+import com.google.common.io.ByteSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,14 +35,18 @@ public class ImageThumbnailer {
         return generateThumbnails(imageBytes, new FileByteSinkFactory(destinationDirectory), thumbDefs);
     }
     public List<ThumbnailingResult> generateThumbnails(byte[] imageBytes, ByteSinkFactory byteSinkFactory, List<ThumbDefinition> thumbDefs) throws IOException {
+        return generateThumbnails(ByteSource.wrap(imageBytes), byteSinkFactory, thumbDefs, false);
+    }
 
-        ImageReader reader = ImageReaderUtils.findCompatibleImageReader(imageBytes);
+    public List<ThumbnailingResult> generateThumbnails(ByteSource imageBytes, ByteSinkFactory byteSinkFactory, List<ThumbDefinition> thumbDefs, boolean useFileCache) throws IOException {
+
+        ImageReader reader = ImageReaderUtils.findCompatibleImageReader(imageBytes, useFileCache);
         List<ThumbnailingResult> results = new ArrayList<ThumbnailingResult>();
 
         if (reader != null) {
             generateThumbnailsInternal(byteSinkFactory, thumbDefs, reader, results);
         } else {
-            log.error("No image readers for image length {}!", imageBytes.length);
+            log.error("No image readers for image!");
         }
         return results;
     }
