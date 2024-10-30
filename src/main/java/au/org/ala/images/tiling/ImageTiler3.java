@@ -66,7 +66,11 @@ public class ImageTiler3 {
     }
 
     public ImageTilerResults tileImage(InputStream imageInputStream, TilerSink tilerSink) throws IOException {
-        int zoomLevels = startTiling(imageInputStream, tilerSink);
+        return tileImage(imageInputStream, tilerSink, 0, Integer.MAX_VALUE);
+    }
+
+    public ImageTilerResults tileImage(InputStream imageInputStream, TilerSink tilerSink, int minLevel, int maxLevel) throws IOException {
+        int zoomLevels = startTiling(imageInputStream, tilerSink, minLevel, maxLevel);
 
         if (!_exceptionOccurred) {
             return new ImageTilerResults(true, zoomLevels);
@@ -76,8 +80,12 @@ public class ImageTiler3 {
 
     }
 
-    private int startTiling(InputStream imageInputStream, TilerSink tilerSink) throws IOException {
+    private int startTiling(InputStream imageInputStream, TilerSink tilerSink, int minLevel, int maxLevel) throws IOException {
         log.debug("tileImage");
+
+        if (minLevel < 0 || maxLevel < 0 || minLevel > maxLevel) {
+            throw new IllegalArgumentException("Invalid min/max levels");
+        }
 
         var result = getBufferedImages(imageInputStream);
         var dimensions = result.imageDimensions;
@@ -86,13 +94,15 @@ public class ImageTiler3 {
         int[] pyramid = _zoomFactorStrategy.getZoomFactors(dimensions.y, dimensions.x);
         int zoomLevels = pyramid.length;
 
+        final int finalMaxLevel = Math.min(maxLevel, zoomLevels);
+
         List<SaveTileTask> ioStream;
         try (var images = result.imageStream) {
             ioStream = images.flatMap(image -> {
 
                 log.debug("tileImage:getZoomFactors");
 
-                return IntStream.range(0, pyramid.length)
+                return IntStream.range(minLevel, finalMaxLevel)
                         .map(index -> pyramid.length - index - 1)
                         .mapToObj(level -> submitLevelForProcessing(image, pyramid[level], tilerSink.getLevelSink(level)))
                         .flatMap(future -> {
