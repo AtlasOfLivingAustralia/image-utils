@@ -37,9 +37,7 @@ public class ImageTilerConfig {
         _zoomFactorStrategy = new DefaultZoomFactorStrategy(_tileSize);
     }
 
-    public ImageTilerConfig(ExecutorService ioExecutor, ExecutorService levelExecutor, int levelThreads, int tileSize, int maxColumnsPerStrip, TileFormat tileFormat) {
-        _ioThreads = 1;
-        _levelThreads = 1;
+    public ImageTilerConfig(ExecutorService ioExecutor, ExecutorService levelExecutor, int tileSize, int maxColumnsPerStrip, TileFormat tileFormat) {
         _tileSize = tileSize;
         _maxColumnsPerStrip = maxColumnsPerStrip;
         _tileFormat = tileFormat;

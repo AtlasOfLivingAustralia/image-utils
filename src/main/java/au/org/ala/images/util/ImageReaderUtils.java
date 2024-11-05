@@ -6,10 +6,9 @@ import com.drew.metadata.Metadata;
 import com.drew.metadata.MetadataException;
 import com.drew.metadata.exif.ExifIFD0Directory;
 import com.drew.metadata.jpeg.JpegDirectory;
-import com.drew.metadata.png.PngDirectory;
-import com.drew.metadata.webp.WebpDirectory;
-import com.github.jaiimageio.plugins.tiff.TIFFDirectory;
+import com.google.common.base.MoreObjects;
 import com.google.common.io.ByteSource;
+import org.apache.commons.lang3.tuple.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.w3c.dom.NodeList;
@@ -20,7 +19,6 @@ import javax.imageio.metadata.IIOMetadata;
 import javax.imageio.metadata.IIOMetadataFormatImpl;
 import javax.imageio.metadata.IIOMetadataNode;
 import javax.imageio.stream.ImageInputStream;
-import java.awt.*;
 import java.awt.geom.AffineTransform;
 import java.awt.image.AffineTransformOp;
 import java.awt.image.BufferedImage;
@@ -109,54 +107,50 @@ public class ImageReaderUtils {
     public static ImageInputStream rotate(ByteSource imageBytes, boolean useFileCache) throws IOException {
 
         try {
-            Metadata metadata;
-            try (InputStream bis = imageBytes.openBufferedStream()) {
-                metadata = ImageMetadataReader.readMetadata(bis);
-            }
-            Collection<ExifIFD0Directory> exifIFD0 = metadata.getDirectoriesOfType(ExifIFD0Directory.class);
-            JpegDirectory jpegDirectory = metadata.getFirstDirectoryOfType(JpegDirectory.class);
 
-            if (jpegDirectory == null || exifIFD0.isEmpty()) {
+            var dimensions = getDimensionsWithMetadataReader(imageBytes);
+
+            if (dimensions == null) {
                 return ImageIO.createImageInputStream(imageBytes.openBufferedStream());
             }
 
-            int orientation = exifIFD0.iterator().next().getInt(ExifIFD0Directory.TAG_ORIENTATION);
-            int width = jpegDirectory.getImageWidth();
-            int height = jpegDirectory.getImageHeight();
-            logger.debug("orientation= " + orientation +", width=" + width + ", height=" + height);
+            var orientation = dimensions.getLeft();
+            var width = dimensions.getRight().width;
+            var height = dimensions.getRight().height;
+            logger.debug("orientation= {}, width={}, height={}", orientation, width, height);
 
             AffineTransform affineTransform = new AffineTransform();
 
             switch (orientation) {
-                case 1:
+                case Normal:
                     break;
-                case 2: // Flip X
+                case FlipH: // Flip X
                     affineTransform.scale(-1.0, 1.0);
                     affineTransform.translate(-width, 0);
                     break;
-                case 3: // PI rotation
+                case Rotate180: // PI rotation
                     affineTransform.translate(width, height);
                     affineTransform.rotate(Math.PI);
                     break;
-                case 4: // Flip Y
+                case FlipV: // Flip Y
                     affineTransform.scale(1.0, -1.0);
                     affineTransform.translate(0, -height);
                     break;
-                case 5: // - PI/2 and Flip X
+                case FlipVRotate90: // - PI/2 and Flip X
                     affineTransform.rotate(-Math.PI / 2);
                     affineTransform.scale(-1.0, 1.0);
                     break;
-                case 6: // -PI/2 and -width
+                case Rotate270: // -PI/2 and -width
                     affineTransform.translate(height, 0);
                     affineTransform.rotate(Math.PI / 2);
                     break;
-                case 7: // PI/2 and Flip
+                case FlipHRotate90: // PI/2 and Flip
                     affineTransform.scale(-1.0, 1.0);
                     affineTransform.translate(-height, 0);
                     affineTransform.translate(0, width);
                     affineTransform.rotate(3 * Math.PI / 2);
                     break;
-                case 8: // PI / 2
+                case Rotate90: // PI / 2
                     affineTransform.translate(0, width);
                     affineTransform.rotate(3 * Math.PI / 2);
                     break;
@@ -164,7 +158,7 @@ public class ImageReaderUtils {
                     break;
             }
 
-            if (orientation > 1 && orientation < 9){
+            if (orientation != Orientation.Normal) {
 
                 BufferedImage originalImage;
                 try (InputStream bis2 = imageBytes.openBufferedStream()) {
@@ -195,23 +189,33 @@ public class ImageReaderUtils {
         }
     }
 
+    /**
+     * Get the image dimensions, respecting the orientation tag if present.
+     * @param imageBytes A byte source for the image
+     * @return The dimensions of the image or null if the dimensions could not be determined
+     */
     public static Dimension getImageDimensions(ByteSource imageBytes) {
         return getImageDimensions(imageBytes, new DefaultImageReaderSelectionStrategy());
     }
+
     public static Dimension getImageDimensions(ByteSource imageBytes, ImageReaderSelectionStrategy selectionStrategy) {
 
         // prefer using the drew noakes metadata reader library as it gives better
         // results for the test images
         var dimensions = getDimensionsWithMetadataReader(imageBytes);
         if (dimensions != null) {
-            return dimensions;
+            return dimensions.getRight();
         }
 
-        return getDimensionsWithImageIOMetadata(imageBytes, selectionStrategy);
+        dimensions = getDimensionsWithImageIOMetadata(imageBytes, selectionStrategy);
+        if (dimensions != null) {
+            return dimensions.getRight();
+        }
 
+        return null;
     }
 
-    private static Dimension getDimensionsWithMetadataReader(ByteSource byteSource) {
+    private static Pair<Orientation, Dimension> getDimensionsWithMetadataReader(ByteSource byteSource) {
         Metadata metadata;
         try (InputStream bis = byteSource.openBufferedStream()) {
             metadata = ImageMetadataReader.readMetadata(bis);
@@ -226,24 +230,29 @@ public class ImageReaderUtils {
             return null;
         }
 
-        for (var exif : exifIFD0) {
-            try {
+        try {
+            int width = jpegDirectory.getImageWidth();
+            int height = jpegDirectory.getImageHeight();
+
+            for (var exif : exifIFD0) {
+
                 if (exif.containsTag(ExifIFD0Directory.TAG_ORIENTATION)) {
                     var orientation = Orientation.fromExifOrientation(exif.getInt(ExifIFD0Directory.TAG_ORIENTATION));
-                    int width = jpegDirectory.getImageWidth();
-                    int height = jpegDirectory.getImageHeight();
-                    logger.debug("orientation= " + orientation +", width=" + width + ", height=" + height);
-                    return orientation.isFlipDimensions() ? new Dimension(height, width) : new Dimension(width, height);
+                    logger.debug("orientation= {}, width={}, height={}", orientation, width, height);
+                    return Pair.of(
+                            orientation,
+                            orientation.isFlipDimensions() ? new Dimension(height, width) : new Dimension(width, height)
+                    );
                 }
-            } catch (MetadataException e) {
-                // ignore
             }
+        } catch (MetadataException e) {
+            logger.debug("Error reading image dimensions or orientation", e);
         }
 
         return null;
     }
 
-    public static Dimension getDimensionsWithImageIOMetadata(ByteSource imageBytes, ImageReaderSelectionStrategy selectionStrategy) {
+    private static Pair<Orientation, Dimension> getDimensionsWithImageIOMetadata(ByteSource imageBytes, ImageReaderSelectionStrategy selectionStrategy) {
         // theoretically this should work for all images, but it doesn't
         // work with the test images for some reason
         try (ImageInputStream iis = ImageIO.createImageInputStream(imageBytes.openStream())) {
@@ -260,9 +269,14 @@ public class ImageReaderUtils {
             int height = reader.getHeight(0);
             int width = reader.getWidth(0);
 
-            logger.info("Image dimensions: width={}, height={}, orientation={}", width, height, orientation);
+            logger.trace("Image dimensions: width={}, height={}, orientation={}", width, height, orientation);
 
-            return orientation.isFlipDimensions() ? new Dimension(height, width) : new Dimension(width, height);
+            reader.dispose();
+
+            return Pair.of(
+                    orientation,
+                    orientation.isFlipDimensions() ? new Dimension(height, width) : new Dimension(width, height)
+            );
         } catch (IOException e) {
             logger.error("Error reading image dimensions", e);
         }
@@ -280,7 +294,7 @@ public class ImageReaderUtils {
      * @see Orientation
      * @see <a href="https://docs.oracle.com/javase/7/docs/api/javax/imageio/metadata/doc-files/standard_metadata.html">Standard (Plug-in Neutral) Metadata Format Specification</a>
      */
-    public static Orientation findImageOrientation(final IIOMetadata metadata) {
+    private static Orientation findImageOrientation(final IIOMetadata metadata) {
         if (metadata != null) {
             IIOMetadataNode root = (IIOMetadataNode) metadata.getAsTree(IIOMetadataFormatImpl.standardMetadataFormatName);
             NodeList imageOrientations = root.getElementsByTagName("ImageOrientation");
@@ -288,19 +302,37 @@ public class ImageReaderUtils {
             if (imageOrientations != null && imageOrientations.getLength() > 0) {
                 IIOMetadataNode imageOrientation = (IIOMetadataNode) imageOrientations.item(0);
                 String orientationValue = imageOrientation.getAttribute("value");
-                logger.debug("Found ImageOrientation tag with value: {}", orientationValue);
+                logger.trace("Found ImageOrientation tag with value: {}", orientationValue);
                 return Orientation.fromMetadataOrientation(orientationValue);
             } else {
-                logger.debug("No ImageOrientation tag found in metadata.");
+                logger.trace("No ImageOrientation tag found in metadata.");
             }
         } else {
-            logger.debug("Metadata is null.");
+            logger.trace("Metadata is null.");
         }
 
         return Orientation.Normal;
     }
 
-    public static enum Orientation {
+    public static class Dimension {
+        public final int width;
+        public final int height;
+
+        public Dimension(int width, int height) {
+            this.width = width;
+            this.height = height;
+        }
+
+        @Override
+        public String toString() {
+            return MoreObjects.toStringHelper(this)
+                    .add("width", width)
+                    .add("height", height)
+                    .toString();
+        }
+    }
+
+    private enum Orientation {
         Normal(1, false),
         FlipH(2, false),
         Rotate180(3, false),
