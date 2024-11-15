@@ -102,18 +102,24 @@ public class ImageTiler3 {
 
                 log.debug("tileImage:getZoomFactors");
 
-                return IntStream.range(minLevel, finalMaxLevel)
-                        .map(index -> pyramid.length - index - 1)
-                        .mapToObj(level -> submitLevelForProcessing(image, pyramid[level], tilerSink.getLevelSink(level)))
-                        .flatMap(future -> {
-                            try {
-                                return future.join();
-                            } catch (Exception e) {
-                                log.error("execution exception", e);
-                                _exceptionOccurred = true;
-                                return Stream.empty();
-                            }
-                        });
+                try {
+                    return IntStream.range(minLevel, finalMaxLevel)
+                            .map(index -> pyramid.length - index - 1)
+                            .mapToObj(level -> submitLevelForProcessing(image, pyramid[level], tilerSink.getLevelSink(level)))
+                            .flatMap(future -> {
+                                try {
+                                    return future.join();
+                                } catch (Exception e) {
+                                    log.error("execution exception", e);
+                                    _exceptionOccurred = true;
+                                    return Stream.empty();
+                                }
+                            });
+                } finally {
+                    if (image != null) {
+                        image.flush();
+                    }
+                }
             }).collect(Collectors.toList());
         }
         try {
@@ -419,6 +425,10 @@ public class ImageTiler3 {
             } catch (Exception | Error ex) {
                 _exceptionOccurred = true;
                 log.error("Exception occurred saving file task", ex);
+            } finally {
+                if (image != null) {
+                    image.flush();
+                }
             }
         }
 

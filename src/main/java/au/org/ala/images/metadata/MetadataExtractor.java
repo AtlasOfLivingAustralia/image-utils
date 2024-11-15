@@ -3,7 +3,7 @@ package au.org.ala.images.metadata;
 import au.org.ala.images.util.FastByteArrayInputStream;
 import com.google.common.io.ByteSource;
 import org.apache.commons.io.FileUtils;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.tika.detect.Detector;
 import org.apache.tika.metadata.Metadata;
 import org.apache.tika.metadata.TikaCoreProperties;

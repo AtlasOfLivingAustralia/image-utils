@@ -6,6 +6,8 @@ import java.util.List;
 
 public class DefaultImageReaderSelectionStrategy implements ImageReaderSelectionStrategy {
 
+    public static final DefaultImageReaderSelectionStrategy INSTANCE = new DefaultImageReaderSelectionStrategy();
+
     public ImageReader selectImageReader(Iterator<ImageReader> candidates) {
 
         if (candidates == null) {

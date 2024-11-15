@@ -1,6 +1,7 @@
 package au.org.ala.images.util;
 
 import com.google.common.io.Resources;
+import org.apache.commons.io.FilenameUtils;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
@@ -32,7 +33,7 @@ public class ImageReaderUtilsTest {
         );
 
         for (var image : landScapeImages) {
-            var dimensions = ImageReaderUtils.getImageDimensions(Resources.asByteSource(Resources.getResource(image)));
+            var dimensions = ImageReaderUtils.getImageDimensions(Resources.asByteSource(Resources.getResource(image)), FilenameUtils.getName(image));
             assertNotNull(dimensions);
             assertEquals(LANDSCAPE_WIDTH, dimensions.width);
             assertEquals(LANDSCAPE_HEIGHT, dimensions.height);
@@ -50,7 +51,7 @@ public class ImageReaderUtilsTest {
         );
 
         for (var image : portraitImages) {
-            var dimensions = ImageReaderUtils.getImageDimensions(Resources.asByteSource(Resources.getResource(image)));
+            var dimensions = ImageReaderUtils.getImageDimensions(Resources.asByteSource(Resources.getResource(image)), FilenameUtils.getName(image));
             assertNotNull(dimensions);
             assertEquals(PORTRAIT_WIDTH, dimensions.width);
             assertEquals(PORTRAIT_HEIGHT, dimensions.height);
