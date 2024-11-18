@@ -52,8 +52,6 @@ public class ImageTiler3 {
         if (config != null) {
             ioThreadPool = config.getIoExecutor();
             levelThreadPool = config.getLevelExecutor();
-//            _ioThreadCount = config.getIOThreadCount();
-//            _maxLevelThreads = config.getLevelThreadCount();
             _tileSize = config.getTileSize();
             _tileFormat = config.getTileFormat();
             _tileBackgroundColor = config.getTileBackgroundColor();
@@ -103,8 +101,13 @@ public class ImageTiler3 {
                 log.debug("tileImage:getZoomFactors");
 
                 try {
-                    return IntStream.range(minLevel, finalMaxLevel)
-                            .map(index -> pyramid.length - index - 1)
+                    var intStream = IntStream.rangeClosed(minLevel, finalMaxLevel);
+                    if (minLevel == 0 && maxLevel == Integer.MAX_VALUE) {
+                        // If we're doing the whole pyramid, start from the largest level and work down
+                        intStream = intStream.map(index -> pyramid.length - index - 1);
+                        // otherwise we're doing user requested levels, so start only process the requested levels
+                    }
+                    return intStream
                             .mapToObj(level -> submitLevelForProcessing(image, pyramid[level], tilerSink.getLevelSink(level)))
                             .flatMap(future -> {
                                 try {
