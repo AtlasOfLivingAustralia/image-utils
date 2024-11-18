@@ -41,18 +41,36 @@ public class MetadataExtractor {
     }
 
     public Map<String, String> readMetadata(byte[] bytes, String filename) {
-        Map<String, String> map = new HashMap<String, String>();
-        if (bytes != null && bytes.length > 0) {
-            String contentType = detectContentType(bytes, filename);
+        return readMetadata(ByteSource.wrap(bytes), filename);
+    }
+
+    public Map<String, String> readMetadata(ByteSource byteSource, String filename) {
+        try {
+            return readMetadata(byteSource.openBufferedStream(), filename);
+        } catch (IOException ex) {
+            log.error("Exception occurred opening stream for reading metadata", ex);
+            return new HashMap<>();
+        }
+    }
+
+    public Map<String, String> readMetadata(InputStream inputStream, String filename) {
+        Map<String, String> map = new HashMap<>();
+        try (BufferedInputStream bis = inputStream instanceof BufferedInputStream ?
+                (BufferedInputStream) inputStream :
+                new BufferedInputStream(inputStream)) {
+            String contentType = detectContentTypeInternal(bis, filename);
             if (StringUtils.isNotEmpty(contentType)) {
                 for (AbstractMetadataParser p : _REGISTRY) {
                     Matcher m = p.getContentTypePattern().matcher(contentType);
                     if (m.matches()) {
-                        p.extractMetadata(bytes, map);
+                        bis.reset();
+                        p.extractMetadata(bis, map);
                         break;
                     }
                 }
             }
+        } catch (Exception ex) {
+            log.error("Exception occurred reading metadata", ex);
         }
         return map;
     }

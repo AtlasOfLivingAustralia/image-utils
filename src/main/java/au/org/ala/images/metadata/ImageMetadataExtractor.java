@@ -11,6 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.BufferedInputStream;
+import java.io.InputStream;
 import java.util.Map;
 import java.util.regex.Pattern;
 
@@ -29,8 +30,13 @@ public class ImageMetadataExtractor extends AbstractMetadataParser {
     @Override
     public void extractMetadata(byte[] bytes, Map<String, String> md) {
         BufferedInputStream bis = new BufferedInputStream(new FastByteArrayInputStream(bytes));
+        extractMetadata(bis, md);
+    }
+
+    @Override
+    public void extractMetadata(InputStream inputStream, Map<String, String> md) {
         try {
-            Metadata metadata = ImageMetadataReader.readMetadata(bis, bytes.length);
+            Metadata metadata = ImageMetadataReader.readMetadata(inputStream);
             for (Directory directory : metadata.getDirectories()) {
                 for (Tag tag : directory.getTags()) {
                     String key = tag.getTagName();

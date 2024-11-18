@@ -29,8 +29,13 @@ public class MP3MetadataParser extends AbstractMetadataParser {
 
     @Override
     public void extractMetadata(byte[] bytes, Map<String, String> md) {
-        try {
             InputStream input = new FastByteArrayInputStream(bytes);
+            extractMetadata(input, md);
+    }
+
+    @Override
+    public void extractMetadata(InputStream unopenedStream, Map<String, String> md) {
+        try(InputStream input = unopenedStream) {
             ContentHandler handler = new DefaultHandler();
             Metadata metadata = new Metadata();
             Parser parser = new Mp3Parser();
@@ -48,6 +53,5 @@ public class MP3MetadataParser extends AbstractMetadataParser {
         } catch (Exception e) {
             log.error("Exception extracting MP3 metadata", e);
         }
-
     }
 }
