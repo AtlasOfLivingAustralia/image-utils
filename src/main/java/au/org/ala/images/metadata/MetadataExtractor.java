@@ -30,6 +30,7 @@ public class MetadataExtractor {
 
         register(new ImageMetadataExtractor());
         register(new MP3MetadataParser());
+        register(new MP4MetadataExtractor());
     }
 
     private static void register(AbstractMetadataParser parser) {
@@ -40,10 +41,22 @@ public class MetadataExtractor {
         return readMetadata(FileUtils.readFileToByteArray(file), file.getName());
     }
 
+    /**
+     * Reads metadata from a byte array
+     * @param bytes The source bytes
+     * @param filename The name of the file (used for content type detection)
+     * @return A map of metadata key value pairs
+     */
     public Map<String, String> readMetadata(byte[] bytes, String filename) {
         return readMetadata(ByteSource.wrap(bytes), filename);
     }
 
+    /**
+     * Reads metadata from a byte source
+     * @param byteSource The source of the bytes
+     * @param filename The name of the file (used for content type detection)
+     * @return A map of metadata key value pairs
+     */
     public Map<String, String> readMetadata(ByteSource byteSource, String filename) {
         try {
             return readMetadata(byteSource.openBufferedStream(), filename);
@@ -53,6 +66,12 @@ public class MetadataExtractor {
         }
     }
 
+    /**
+     * Reads metadata from an input stream
+     * @param inputStream This stream will be closed after reading
+     * @param filename The name of the file (used for content type detection)
+     * @return A map of metadata key value pairs
+     */
     public Map<String, String> readMetadata(InputStream inputStream, String filename) {
         Map<String, String> map = new HashMap<>();
         try (BufferedInputStream bis = inputStream instanceof BufferedInputStream ?

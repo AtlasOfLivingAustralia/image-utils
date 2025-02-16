@@ -92,7 +92,7 @@ public class ImageTiler3 {
         int[] pyramid = _zoomFactorStrategy.getZoomFactors(dimensions.y, dimensions.x);
         int zoomLevels = pyramid.length;
 
-        final int finalMaxLevel = Math.min(maxLevel, zoomLevels);
+        final int finalMaxLevel = Math.min(maxLevel, zoomLevels - 1);
 
         List<SaveTileTask> ioStream;
         try (var images = result.imageStream) {
@@ -104,7 +104,7 @@ public class ImageTiler3 {
                     var intStream = IntStream.rangeClosed(minLevel, finalMaxLevel);
                     if (minLevel == 0 && maxLevel == Integer.MAX_VALUE) {
                         // If we're doing the whole pyramid, start from the largest level and work down
-                        intStream = intStream.map(index -> pyramid.length - index - 1);
+                        intStream = intStream.map(index -> finalMaxLevel - index);
                         // otherwise we're doing user requested levels, so start only process the requested levels
                     }
                     return intStream
@@ -148,14 +148,14 @@ public class ImageTiler3 {
 
     private GetBufferedImageResult getBufferedImages(InputStream imageInputStream) throws IOException {
         // maintain memory usage by splitting image into 8k or 4k chunks
-
+        log.trace("getBufferedImages");
         byte[] imageBytes;
         try (var inputStream = imageInputStream) {
             imageBytes = IOUtils.toByteArray(inputStream);
         }
-        log.debug("tileImage:inputStream to imageBytes");
+        log.trace("getBufferedImages:inputStream to imageBytes");
         var reader = ImageReaderUtils.findCompatibleImageReader(imageBytes);
-        log.debug("tileImage:findCompatibleImageReader");
+        log.trace("getBufferedImages:findCompatibleImageReader");
         BufferedImage image;
         var stream = Stream.<Point>builder();
 
@@ -166,12 +166,14 @@ public class ImageTiler3 {
 
             var ratio = 8192 / _tileSize;
             var segmentSize = ratio * _tileSize;
-            log.debug("w: {}, h: {}, _tileSize: {}, ratio: {}, segmentSize: {}", w, h, _tileSize, ratio, segmentSize);
+            log.trace("getBufferedImages: w: {}, h: {}, _tileSize: {}, ratio: {}, segmentSize: {}", w, h, _tileSize, ratio, segmentSize);
             var xs = (int)Math.ceil((double)w / (double) segmentSize);
             var ys = (int)Math.ceil((double)h / (double) segmentSize);
+            log.trace("getBufferedImages: xs: {}, ys: {}", xs, ys);
 
             for (int i = 0; i < xs; ++i) {
                 for (int j = 0; j < ys; ++j) {
+                    log.trace("getBufferedImages: accepting new point ({}, {})", i, j);
                     stream.accept(new Point(i,j));
                 }
             }
@@ -191,8 +193,13 @@ public class ImageTiler3 {
                 } else {
                     rectHeight = segmentSize;
                 }
+                int rectX = p.x * segmentSize;
+                int rectY = p.y * segmentSize;
+                log.trace("getBufferedImages: sourceRegion: x: {}, y: {}, rectWidth: {}, rectHeight: {}", rectX, rectY, rectWidth, rectHeight);
+//                log.debug("getBufferedImages: sourceRegion: x: {}, y: {}, rectWidth: {}, rectHeight: {}", p.x, p.y, rectWidth, rectHeight);
 
-                params.setSourceRegion(new Rectangle(p.x, p.y, rectWidth, rectHeight));
+                params.setSourceRegion(new Rectangle(rectX, rectY, rectWidth, rectHeight));
+//                params.setSourceRegion(new Rectangle(p.x, p.y, rectWidth, rectHeight));
 //                params.setSourceSubsampling(subsample, subsample, 0, 0);
                 try {
                     return reader.read(0, params);
@@ -252,7 +259,7 @@ public class ImageTiler3 {
 
     private Stream<SaveTileTask> tileImageAtSubSampleLevel(BufferedImage bufferedImage, int subsample, TilerSink.LevelSink levelSink) throws IOException {
 
-        log.debug("tileImageAtSubSampleLevel(subsample = {})", subsample);
+        log.trace("tileImageAtSubSampleLevel(subsample = {})", subsample);
 //        ImageReader reader = ImageReaderUtils.findCompatibleImageReader(bytes);
 
 //        if (reader != null) {
@@ -265,7 +272,7 @@ public class ImageTiler3 {
         int rows = (int) Math.ceil( ((double) height) / ((double) _tileSize));
         int cols = (int) Math.ceil( ((double) width) / ((double) _tileSize));
 
-        log.debug("tileImageAtSubSampleLevel: srcHeight {} srcWidth {} height {} width {} cols {} rows {}", srcHeight, srcWidth, height, width, cols, rows);
+        log.trace("tileImageAtSubSampleLevel: srcHeight {} srcWidth {} height {} width {} cols {} rows {} image {}", srcHeight, srcWidth, height, width, cols, rows, bufferedImage);
 
 //        int stripWidth = _tileSize * subsample * _maxColsPerStrip;
 //        int numberOfStrips = (int) Math.ceil( ((double) srcWidth) / ((double) stripWidth));
@@ -278,7 +285,6 @@ public class ImageTiler3 {
 //            after = scaleOp.filter(before, after);
 
         var resized = Scalr.resize(bufferedImage, width, height);
-
 
         List<SaveTileTask> saveTileTasks = splitIntoTiles(resized, levelSink, cols, rows);
 

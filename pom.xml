@@ -127,6 +127,10 @@
         <maven.compiler.source>11</maven.compiler.source>
         <maven.compiler.target>11</maven.compiler.target>
         <animal-sniffer-signature.artifact>java11</animal-sniffer-signature.artifact>
+<!--        <targetJdk>1.21</targetJdk>-->
+<!--        <maven.compiler.source>21</maven.compiler.source>-->
+<!--        <maven.compiler.target>21</maven.compiler.target>-->
+<!--        <animal-sniffer-signature.artifact>java21</animal-sniffer-signature.artifact>-->
         <animal-sniffer-signature.version>1.0</animal-sniffer-signature.version>
     </properties>
     <build>

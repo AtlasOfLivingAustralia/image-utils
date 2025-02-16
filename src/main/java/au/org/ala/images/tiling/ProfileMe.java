@@ -28,6 +28,8 @@ public class ProfileMe {
 
         var ioPool = Executors.newFixedThreadPool(1);
         var workPool = ForkJoinPool.commonPool();//Executors.newFixedThreadPool(2);
+//        var ioPool = Executors.newVirtualThreadPerTaskExecutor();
+//        var workPool = Executors.newVirtualThreadPerTaskExecutor();
 
         ImageTilerConfig config = new ImageTilerConfig(ioPool, workPool);
         Stopwatch sw = Stopwatch.createUnstarted();
