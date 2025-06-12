@@ -3,6 +3,7 @@ package au.org.ala.images.metadata;
 import au.org.ala.images.util.FastByteArrayInputStream;
 import com.google.common.io.ByteSource;
 import org.apache.commons.io.FileUtils;
+import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.tika.detect.Detector;
 import org.apache.tika.metadata.Metadata;
@@ -88,6 +89,8 @@ public class MetadataExtractor {
                     }
                 }
             }
+            // Consume the stream to allow eg S3 to reuse underlying connections
+            IOUtils.consume(bis);
         } catch (Exception ex) {
             log.error("Exception occurred reading metadata", ex);
         }
@@ -96,7 +99,9 @@ public class MetadataExtractor {
 
     public String detectContentType(ByteSource byteSource, String filename) {
         try (InputStream bis = byteSource.openBufferedStream()) {
-            return detectContentTypeInternal(bis, filename);
+            String result = detectContentTypeInternal(bis, filename);
+            IOUtils.consume(bis);
+            return result;
         } catch (Exception ex) {
             log.error("Exception occurred detecting content type", ex);
         }

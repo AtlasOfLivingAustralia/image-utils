@@ -1,6 +1,7 @@
 package au.org.ala.images.metadata;
 
 import au.org.ala.images.util.FastByteArrayInputStream;
+import org.apache.commons.io.IOUtils;
 import org.apache.tika.metadata.Metadata;
 import org.apache.tika.parser.ParseContext;
 import org.apache.tika.parser.Parser;
@@ -44,6 +45,9 @@ public class MP4MetadataExtractor extends AbstractMetadataParser {
             for(String name : metadataNames) {
                 md.put(name, metadata.get(name));
             }
+
+            // Consume the input stream to avoid resource leaks
+            IOUtils.consume(input);
 
         } catch (Exception e) {
             log.error("Exception extracting MP4 metadata", e);
