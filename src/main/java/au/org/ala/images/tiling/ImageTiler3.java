@@ -19,12 +19,16 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
+import javax.imageio.plugins.jpeg.JPEGImageWriteParam;
+import javax.imageio.ImageWriteParam;
+import javax.imageio.stream.ImageOutputStream;
 
 public class ImageTiler3 {
 
@@ -81,6 +85,9 @@ public class ImageTiler3 {
     private int startTiling(InputStream imageInputStream, TilerSink tilerSink, int minLevel, int maxLevel) throws IOException {
         log.debug("tileImage");
 
+        // Process in batches to reduce memory usage
+        final int BATCH_SIZE = 100;
+
         if (minLevel < 0 || maxLevel < 0 || minLevel > maxLevel) {
             throw new IllegalArgumentException("Invalid min/max levels");
         }
@@ -101,39 +108,77 @@ public class ImageTiler3 {
 
         List<SaveTileTask> ioStream;
         try (var images = result.imageStream) {
-            ioStream = images.flatMap(image -> {
-
-                log.debug("tileImage:getZoomFactors");
-
+            // Process each image
+            images.forEach(image -> {
+                log.debug("tileImage:processing image");
+                
                 try {
+                    // Create the stream of levels to process
                     var intStream = IntStream.rangeClosed(minLevel, finalMaxLevel);
                     if (minLevel == 0 && maxLevel == Integer.MAX_VALUE) {
                         // If we're doing the whole pyramid, start from the largest level and work down
                         intStream = intStream.map(index -> finalMaxLevel - index);
-                        // otherwise we're doing user requested levels, so start only process the requested levels
                     }
-                    return intStream
-                            .mapToObj(level -> submitLevelForProcessing(image, pyramid[level], tilerSink.getLevelSink(level)))
-                            .flatMap(future -> {
-                                try {
-                                    return future.join();
-                                } catch (Exception e) {
-                                    log.error("execution exception", e);
-                                    _exceptionOccurred = true;
-                                    return Stream.empty();
+                    
+                    // Process each level
+                    intStream.forEach(level -> {
+                        try {
+                            // Submit the level for processing
+                            CompletableFuture<Stream<SaveTileTask>> levelFuture = 
+                                submitLevelForProcessing(image, pyramid[level], tilerSink.getLevelSink(level));
+                            
+                            // Process the tiles for this level
+                            Stream<SaveTileTask> tileStream = levelFuture.join();
+                            
+                            // Process tiles in batches
+                            List<SaveTileTask> batch = new ArrayList<>(BATCH_SIZE);
+                            List<CompletableFuture<Void>> tileFutures = new ArrayList<>();
+                            
+                            tileStream.forEach(task -> {
+                                batch.add(task);
+                                
+                                // When batch is full, submit it for processing
+                                if (batch.size() >= BATCH_SIZE) {
+                                    List<SaveTileTask> currentBatch = new ArrayList<>(batch);
+                                    batch.clear();
+                                    
+                                    // Process the batch
+                                    tileFutures.add(CompletableFuture.runAsync(() -> {
+                                        currentBatch.forEach(SaveTileTask::run);
+                                    }, ioThreadPool));
                                 }
                             });
+                            
+                            // Process any remaining tiles
+                            if (!batch.isEmpty()) {
+                                List<SaveTileTask> currentBatch = new ArrayList<>(batch);
+                                batch.clear();
+                                
+                                tileFutures.add(CompletableFuture.runAsync(() -> {
+                                    currentBatch.forEach(SaveTileTask::run);
+                                }, ioThreadPool));
+                            }
+                            
+                            // Wait for all tile batches to complete
+                            try {
+                                CompletableFuture.allOf(tileFutures.toArray(new CompletableFuture[0])).join();
+                            } catch (Exception e) {
+                                log.error("Error processing tile batch", e);
+                                _exceptionOccurred = true;
+                            }
+                        } catch (Exception e) {
+                            log.error("Error processing level " + level, e);
+                            _exceptionOccurred = true;
+                        }
+                    });
                 } finally {
                     if (image != null) {
                         image.flush();
                     }
                 }
-            }).collect(Collectors.toList());
-        }
-        try {
-            CompletableFuture.allOf(ioStream.stream().map(task -> CompletableFuture.runAsync(task, ioThreadPool)).collect(Collectors.toList()).toArray(CompletableFuture[]::new)).join();
+            });
         } catch (Exception e) {
-            log.error("execution exception", e);
+            log.error("Error processing image stream", e);
             _exceptionOccurred = true;
         }
 
@@ -265,9 +310,6 @@ public class ImageTiler3 {
     private Stream<SaveTileTask> tileImageAtSubSampleLevel(BufferedImage bufferedImage, int subsample, TilerSink.LevelSink levelSink) throws IOException {
 
         log.trace("tileImageAtSubSampleLevel(subsample = {})", subsample);
-//        ImageReader reader = ImageReaderUtils.findCompatibleImageReader(bytes);
-
-//        if (reader != null) {
 
         int srcHeight = bufferedImage.getHeight();
         int srcWidth = bufferedImage.getWidth();
@@ -279,49 +321,69 @@ public class ImageTiler3 {
 
         log.trace("tileImageAtSubSampleLevel: srcHeight {} srcWidth {} height {} width {} cols {} rows {} image {}", srcHeight, srcWidth, height, width, cols, rows, bufferedImage);
 
-//        int stripWidth = _tileSize * subsample * _maxColsPerStrip;
-//        int numberOfStrips = (int) Math.ceil( ((double) srcWidth) / ((double) stripWidth));
-
-
-//            AffineTransform at = new AffineTransform();
-//            at.scale(2.0, 2.0);
-//            AffineTransformOp scaleOp =
-//                    new AffineTransformOp(at, AffineTransformOp.TYPE_NEAREST_NEIGHBOR);
-//            after = scaleOp.filter(before, after);
-
-        var resized = Scalr.resize(bufferedImage, width, height);
-
-        List<SaveTileTask> saveTileTasks = splitIntoTiles(resized, levelSink, cols, rows);
-
+        // Process tiles directly without creating a full resized image
+        List<SaveTileTask> saveTileTasks = new ArrayList<>(cols * rows);
+        
+        // Calculate tile dimensions in the source image
+        for (int col = 0; col < cols; col++) {
+            TilerSink.ColumnSink columnSink = levelSink.getColumnSink(col, 0, 1);
+            
+            // Calculate source region for this column
+            int srcColStart = col * _tileSize * subsample;
+            int srcColWidth = Math.min(_tileSize * subsample, srcWidth - srcColStart);
+            
+            if (srcColStart >= srcWidth) {
+                continue;
+            }
+            
+            for (int row = 0; row < rows; row++) {
+                // Calculate source region for this row (from bottom to top)
+                int srcRowStart = Math.max(0, srcHeight - ((row + 1) * _tileSize * subsample));
+                int srcRowHeight = Math.min(_tileSize * subsample, srcHeight - srcRowStart);
+                
+                if (srcRowHeight <= 0) {
+                    continue;
+                }
+                
+                // Extract and resize just this tile
+                BufferedImage srcTile = bufferedImage.getSubimage(srcColStart, srcRowStart, srcColWidth, srcRowHeight);
+                
+                // Calculate destination tile dimensions
+                int destWidth = (int) Math.ceil(srcColWidth / (double) subsample);
+                int destHeight = (int) Math.ceil(srcRowHeight / (double) subsample);
+                
+                // Resize just this tile
+                BufferedImage resizedTile = null;
+                if (destWidth > 0 && destHeight > 0) {
+                    resizedTile = Scalr.resize(srcTile, destWidth, destHeight);
+                    srcTile.flush(); // Release memory
+                }
+                
+                // Create destination tile
+                BufferedImage destTile = createDestTile();
+                Graphics g = GRAPHICS_ENV.createGraphics(destTile);
+                
+                // Fill background for JPEG if needed
+                if (_tileFormat == TileFormat.JPEG && resizedTile != null) {
+                    g.setColor(_tileBackgroundColor);
+                    g.fillRect(0, 0, _tileSize, _tileSize);
+                }
+                
+                // Draw the resized tile onto the destination tile
+                if (resizedTile != null) {
+                    g.drawImage(resizedTile, 0, _tileSize - resizedTile.getHeight(), null);
+                    resizedTile.flush(); // Release memory
+                }
+                
+                g.dispose();
+                
+                // Add to tasks
+                ByteSink tileSink = columnSink.getTileSink(rows - row - 1);
+                saveTileTasks.add(new SaveTileTask(tileSink, destTile));
+            }
+        }
+        
         return saveTileTasks.stream();
-//        saveTileTasks.forEach(SaveTileTask::run);
-
-//        ImageFilter filter = new SubsamplingFilter(subsample, subsample);
-//        ImageProducer prod;
-//        prod = new FilteredImageSource(bufferedImage.getSource(), filter);
-//        Image subSampledImage = Toolkit.getDefaultToolkit().createImage(prod);
-
-//        for (int stripIndex = 0; stripIndex < numberOfStrips; stripIndex++) {
-//
-//            int srcStripOffset = stripIndex * stripWidth;
-//            if (srcStripOffset > srcWidth) {
-//                continue;
-//            }
-//
-////                Rectangle stripRect = new Rectangle(srcStripOffset, 0, stripWidth, srcHeight);
-////                ImageReadParam params = reader.getDefaultReadParam();
-////                params.setSourceRegion(stripRect);
-////                params.setSourceSubsampling(subsample, subsample, 0, 0);
-////                BufferedImage strip = reader.read(0, params);
-//            var strip = resized.getSubimage(srcStripOffset, 0, stripWidth, srcHeight);
-//
-//
-//            splitIntoTiles(strip, levelSink, cols, rows, ioThreadPool);
-//        }
-//            reader.dispose();
-//        } else {
-//            throw new RuntimeException("No readers found suitable for file");
-//        }
     }
 
     private List<SaveTileTask> splitIntoTiles(BufferedImage strip, TilerSink.LevelSink levelSink, int cols, int rows) {
@@ -412,30 +474,43 @@ public class ImageTiler3 {
 
         public void run() {
             try {
-
                 String format = _tileFormat == TileFormat.PNG ? "png" : "jpeg";
-                try (OutputStream tileStream = tileSink.openStream()) {
-                    if (!ImageIO.write(image, format, tileStream)) {
-                        _exceptionOccurred = true;
+                
+                // Use a more efficient approach for writing images
+                if (_tileFormat == TileFormat.JPEG) {
+                    // For JPEG, use a specific writer with optimized compression settings
+                    try (OutputStream tileStream = tileSink.openStream()) {
+                        // Get a JPEG writer
+                        Iterator<javax.imageio.ImageWriter> writers = ImageIO.getImageWritersByFormatName("jpeg");
+                        if (writers.hasNext()) {
+                            javax.imageio.ImageWriter writer = writers.next();
+                            try (ImageOutputStream ios = ImageIO.createImageOutputStream(tileStream)) {
+                                writer.setOutput(ios);
+                                
+                                // Configure compression
+                                JPEGImageWriteParam param = new JPEGImageWriteParam(null);
+                                param.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
+                                param.setCompressionQuality(0.9F); // Good balance between quality and size
+                                
+                                // Write the image
+                                writer.write(null, new javax.imageio.IIOImage(image, null, null), param);
+                                writer.dispose();
+                            }
+                        } else {
+                            // Fall back to standard method if no JPEG writer is available
+                            if (!ImageIO.write(image, format, tileStream)) {
+                                _exceptionOccurred = true;
+                            }
+                        }
+                    }
+                } else {
+                    // For PNG, use the standard method
+                    try (OutputStream tileStream = tileSink.openStream()) {
+                        if (!ImageIO.write(image, format, tileStream)) {
+                            _exceptionOccurred = true;
+                        }
                     }
                 }
-
-//                if (_tileFormat == TileFormat.JPEG) {
-//                    ImageWriter writer = ImageIO.getImageWritersByFormatName("jpeg").next();
-//                    ImageOutputStream ios = ImageIO.createImageOutputStream(file);
-//                    writer.setOutput(ios);
-//                    ImageWriteParam param = writer.getDefaultWriteParam();
-//                    param.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
-//                    param.setCompressionQuality(1.0F); // Highest quality
-//                    writer.write(image);
-//                    writer.dispose();
-//                    ios.close();
-//                } else {
-//                    if (!ImageIO.write(image,"png", file)) {
-//                        _exceptionOccurred = true;
-//                    }
-//                }
-
             } catch (Exception | Error ex) {
                 _exceptionOccurred = true;
                 log.error("Exception occurred saving file task", ex);
@@ -443,8 +518,9 @@ public class ImageTiler3 {
                 if (image != null) {
                     image.flush();
                 }
+                // Encourage garbage collection for large batch operations
+                image = null;
             }
         }
-
     }
 }
