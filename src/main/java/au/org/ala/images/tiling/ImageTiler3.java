@@ -94,6 +94,11 @@ public class ImageTiler3 {
 
         final int finalMaxLevel = Math.min(maxLevel, zoomLevels - 1);
 
+        if (minLevel > finalMaxLevel) {
+            log.debug("tileImage: asked for levels {} to {}, but only {} levels available", minLevel, maxLevel, zoomLevels);
+            return zoomLevels; // No levels to process
+        }
+
         List<SaveTileTask> ioStream;
         try (var images = result.imageStream) {
             ioStream = images.flatMap(image -> {
