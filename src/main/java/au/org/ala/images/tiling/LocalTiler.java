@@ -29,8 +29,8 @@ public class LocalTiler {
 //        var workPool = Executors.newVirtualThreadPerTaskExecutor();
 
         ImageTilerConfig config = new ImageTilerConfig(ioPool, workPool);
-        ImageTiler3 tiler = new ImageTiler3(config);
-//        ImageTiler tiler = new ImageTiler(config);
+//        ImageTiler3 tiler = new ImageTiler3(config);
+        ImageTiler tiler = new ImageTiler(config);
         try {
             long start = System.nanoTime();
             ImageTilerResults results = tiler.tileImage(f, dest);
