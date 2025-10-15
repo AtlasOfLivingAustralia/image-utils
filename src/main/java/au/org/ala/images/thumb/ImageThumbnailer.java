@@ -18,6 +18,7 @@ import javax.imageio.ImageIO;
 import javax.imageio.ImageReadParam;
 import javax.imageio.ImageReader;
 import java.awt.*;
+import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
 import java.awt.image.BufferedImageOp;
 import java.io.ByteArrayOutputStream;
@@ -168,7 +169,20 @@ public class ImageThumbnailer {
 
                 Graphics g = null;
                 try {
-                    if (!thumbDef.isSquare()) {
+                    if (thumbDef.isSquare() && backgroundColor == null) {
+                        // centre crop the image to a square
+                        int cropSize = Math.min(thumbHeight, thumbWidth);
+                        int x = (thumbWidth - cropSize) / 2;
+                        int y = (thumbHeight - cropSize) / 2;
+                        BufferedImageOp crop = new AffineTransformOp(
+                                AffineTransform.getTranslateInstance(-x, -y),
+                                renderingHints
+                        );
+                        thumbImage = crop.filter(scaledThumb, null);
+                        scaledThumb.flush();
+                        scaledThumb = null;
+
+                    } else if (!thumbDef.isSquare()) {
                         // Need to paint anyway, as the source bytes might contain an alpha channel,
                         // and this is going to JPG with no transparency - this avoids weird colouration effects.
                         thumbImage = new BufferedImage(scaledThumb.getWidth(), scaledThumb.getHeight(), BufferedImage.TYPE_3BYTE_BGR);

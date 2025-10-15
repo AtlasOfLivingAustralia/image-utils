@@ -11,6 +11,7 @@ public class ThumbDefinition {
             new ThumbDefinition(300, true, Color.black, "thumbnail_square_black"),
             new ThumbDefinition(300, true, Color.white, "thumbnail_square_white"),
             new ThumbDefinition(300, true, Color.darkGray, "thumbnail_square_darkGray"),
+            new ThumbDefinition(300, true, null, "thumbnail_centre_crop"),
             new ThumbDefinition(650, false, null, "thumbnail_large")
     );
     private int _maximumDimension;
