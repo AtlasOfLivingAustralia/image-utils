@@ -162,55 +162,67 @@ public class ImageThumbnailer {
                 boolean isPNG = false;
                 BufferedImage thumbImage;
 
-                BufferedImage scaledThumb = ImageUtils.scaleWidth(thumbSrc, size);
-                thumbSrc.flush();
-                int thumbHeight = scaledThumb.getHeight();
-                int thumbWidth = scaledThumb.getWidth();
-
                 Graphics g = null;
                 try {
                     if (thumbDef.isSquare() && backgroundColor == null) {
                         // centre crop the image to a square
-                        int cropSize = Math.min(thumbHeight, thumbWidth);
-                        int x = (thumbWidth - cropSize) / 2;
-                        int y = (thumbHeight - cropSize) / 2;
-                        BufferedImageOp crop = new AffineTransformOp(
-                                AffineTransform.getTranslateInstance(-x, -y),
-                                renderingHints
-                        );
-                        thumbImage = crop.filter(scaledThumb, null);
-                        scaledThumb.flush();
-                        scaledThumb = null;
+                        if (thumbSrc.getHeight() == thumbSrc.getWidth() && thumbSrc.getHeight() <= size) {
+                            // already a square of the right size
+                            thumbImage = thumbSrc;
+                            thumbSrc = null;
+                        } else {
+                            int cropSize = Math.min(thumbSrc.getHeight(), thumbSrc.getWidth());
+                            int x = (thumbSrc.getWidth() - cropSize) / 2;
+                            int y = (thumbSrc.getHeight() - cropSize) / 2;
+                            BufferedImageOp crop = new AffineTransformOp(
+                                    AffineTransform.getTranslateInstance(-x, -y),
+                                    renderingHints
+                            );
+                            BufferedImage croppedThumb = crop.filter(thumbSrc, null);
+                            thumbSrc.flush();
 
-                    } else if (!thumbDef.isSquare()) {
-                        // Need to paint anyway, as the source bytes might contain an alpha channel,
-                        // and this is going to JPG with no transparency - this avoids weird colouration effects.
-                        thumbImage = new BufferedImage(scaledThumb.getWidth(), scaledThumb.getHeight(), BufferedImage.TYPE_3BYTE_BGR);
-                        g = thumbImage.getGraphics();
-                        g.drawImage(scaledThumb, 0, 0, null);
+                            BufferedImage scaledThumb = ImageUtils.scaleWidth(croppedThumb, size);
+                            croppedThumb.flush();
+                            thumbImage = scaledThumb;
+                        }
                     } else {
-                        if (backgroundColor == null) {
-                            isPNG = true;
-                            thumbImage = new BufferedImage(size, size, BufferedImage.TYPE_4BYTE_ABGR);
+
+                        BufferedImage scaledThumb = ImageUtils.scaleWidth(thumbSrc, size);
+                        thumbSrc.flush();
+                        int thumbHeight = scaledThumb.getHeight();
+                        int thumbWidth = scaledThumb.getWidth();
+
+
+                        if (!thumbDef.isSquare()) {
+                            // Need to paint anyway, as the source bytes might contain an alpha channel,
+                            // and this is going to JPG with no transparency - this avoids weird colouration effects.
+                            thumbImage = new BufferedImage(scaledThumb.getWidth(), scaledThumb.getHeight(), BufferedImage.TYPE_3BYTE_BGR);
                             g = thumbImage.getGraphics();
-                        } else {
-                            thumbImage = new BufferedImage(size, size, BufferedImage.TYPE_3BYTE_BGR);
-                            g = thumbImage.getGraphics();
-                            g.setColor(backgroundColor);
-                            g.fillRect(0, 0, size, size);
-                        }
-                        // Draw the non-square image centered on the square target
-                        if (thumbHeight < size) {
-                            int top = (size / 2) - (thumbHeight / 2);
-                            g.drawImage(scaledThumb, 0, top, null);
-                        } else if (thumbWidth < size) {
-                            int left = (size / 2) - (thumbWidth / 2);
-                            g.drawImage(scaledThumb, left, 0, null);
-                        } else {
                             g.drawImage(scaledThumb, 0, 0, null);
+                        } else {
+                            if (backgroundColor == null) {
+                                isPNG = true;
+                                thumbImage = new BufferedImage(size, size, BufferedImage.TYPE_4BYTE_ABGR);
+                                g = thumbImage.getGraphics();
+                            } else {
+                                thumbImage = new BufferedImage(size, size, BufferedImage.TYPE_3BYTE_BGR);
+                                g = thumbImage.getGraphics();
+                                g.setColor(backgroundColor);
+                                g.fillRect(0, 0, size, size);
+                            }
+                            // Draw the non-square image centered on the square target
+                            if (thumbHeight < size) {
+                                int top = (size / 2) - (thumbHeight / 2);
+                                g.drawImage(scaledThumb, 0, top, null);
+                            } else if (thumbWidth < size) {
+                                int left = (size / 2) - (thumbWidth / 2);
+                                g.drawImage(scaledThumb, left, 0, null);
+                            } else {
+                                g.drawImage(scaledThumb, 0, 0, null);
+                            }
                         }
+                        scaledThumb.flush();
                     }
-                    scaledThumb.flush();
                 } finally {
                     if (g != null) {
                         g.dispose();
