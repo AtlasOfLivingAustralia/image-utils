@@ -164,27 +164,38 @@ public class ImageThumbnailer {
 
                 Graphics g = null;
                 try {
-                    if (thumbDef.isSquare() && backgroundColor == null) {
+                    if (thumbDef.isSquare() && thumbDef.isCentreCrop()) {
                         // centre crop the image to a square
-                        if (thumbSrc.getHeight() == thumbSrc.getWidth() && thumbSrc.getHeight() <= size) {
+                        if (thumbSrc.getHeight() == thumbSrc.getWidth() && thumbSrc.getHeight() == size) {
                             // already a square of the right size
-                            thumbImage = thumbSrc;
-                            thumbSrc = null;
+                            thumbImage = new BufferedImage(size, size, BufferedImage.TYPE_3BYTE_BGR);
+                            g = thumbImage.getGraphics();
+                            g.drawImage(thumbSrc, 0, 0, null);
+
+                            thumbSrc.flush();
                         } else {
                             int cropSize = Math.min(thumbSrc.getHeight(), thumbSrc.getWidth());
                             int x = (thumbSrc.getWidth() - cropSize) / 2;
                             int y = (thumbSrc.getHeight() - cropSize) / 2;
-                            BufferedImageOp crop = new AffineTransformOp(
-                                    AffineTransform.getTranslateInstance(-x, -y),
-                                    renderingHints
-                            );
-                            BufferedImage croppedThumb = crop.filter(thumbSrc, null);
-                            thumbSrc.flush();
 
+                            BufferedImage croppedThumb = thumbSrc.getSubimage(x, y, cropSize, cropSize);
                             BufferedImage scaledThumb = ImageUtils.scaleWidth(croppedThumb, size);
+                            thumbSrc.flush();
                             croppedThumb.flush();
-                            thumbImage = scaledThumb;
+
+                            thumbImage = new BufferedImage(size, size, BufferedImage.TYPE_3BYTE_BGR);
+                            g = thumbImage.getGraphics();
+                            g.drawImage(scaledThumb, 0, 0, null);
+
+                            scaledThumb.flush();
                         }
+                    } else if (size == -1 && thumbDef.getWidth() != -1) {
+                        BufferedImage scaledThumb = ImageUtils.scaleWidth(thumbSrc, thumbDef.getWidth());
+                        thumbSrc.flush();
+                        thumbImage = new BufferedImage(scaledThumb.getWidth(), scaledThumb.getHeight(), BufferedImage.TYPE_3BYTE_BGR);
+                        g = thumbImage.getGraphics();
+                        g.drawImage(scaledThumb, 0, 0, null);
+                        scaledThumb.flush();
                     } else {
 
                         BufferedImage scaledThumb = ImageUtils.scaleWidth(thumbSrc, size);
