@@ -232,10 +232,16 @@ public class ImageReaderUtils {
             return dimensions;
         }
 
-        dimensions = getDimensionsWithCommonsImaging(imageBytes, filename);
-        if (dimensions != null) {
-            return dimensions;
+        // this can throw if it can't process the image metadata
+        try {
+            dimensions = getDimensionsWithCommonsImaging(imageBytes, filename);
+            if (dimensions != null) {
+                return dimensions;
+            }
+        } catch (Exception e) {
+            logger.info("Could not get image dimensions using commons imaging for {}, exception message {}", filename, e.getMessage());
         }
+
 
         dimensions = getDimensionsWithImageIOMetadata(imageBytes, selectionStrategy);
         return dimensions;

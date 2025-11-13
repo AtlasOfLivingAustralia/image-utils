@@ -105,13 +105,15 @@ public class ImageThumbnailer {
             if (height > MAX_THUMB_SIZE || width > MAX_THUMB_SIZE) {
                 // roughly scale (subsample) the image to a max dimension of 1024
                 int ratio;
-                if (height > width) {
+                if (height >= width) {
                     ratio = height / MAX_THUMB_SIZE;
                 } else {
                     ratio = width / MAX_THUMB_SIZE;
                 }
 
-                imageParams.setSourceSubsampling(ratio, ratio == 0 ? 1 : ratio, 0, 0);
+                ratio = ratio == 0 ? 1 : ratio;
+
+                imageParams.setSourceSubsampling(ratio, ratio, 0, 0);
                 var inputSrc = reader.read(0, imageParams);
                 // apply orientation if needed
                 thumbSrc = applyOrientation(orientation, inputSrc);
@@ -241,11 +243,14 @@ public class ImageThumbnailer {
                 }
 
                 if (thumbImage != null) {
+                    boolean result = false;
                     try (OutputStream thumbOutputStream = destination.openStream()) {
-                        ImageIO.write(thumbImage, isPNG ? "PNG" : "JPG", thumbOutputStream);
+                        result = ImageIO.write(thumbImage, isPNG ? "PNG" : "JPG", thumbOutputStream);
                     }
                     thumbImage.flush();
-                    results.add(new ThumbnailingResult(thumbImage.getWidth(), thumbImage.getHeight(), thumbDef.isSquare(), thumbDef.getName()));
+                    if (result) {
+                        results.add(new ThumbnailingResult(thumbImage.getWidth(), thumbImage.getHeight(), thumbDef.isSquare(), thumbDef.getName()));
+                    }
                 }
             }
         }
