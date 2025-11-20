@@ -26,6 +26,10 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
+/**
+ * Alternate tiler implementation that works with input streams and uses
+ * a different threading model.
+ */
 public class ImageTiler3 {
 
     private static final Logger log = LoggerFactory.getLogger(ImageTiler3.class);
