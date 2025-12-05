@@ -15,6 +15,7 @@ import org.slf4j.LoggerFactory;
 import javax.imageio.ImageIO;
 import javax.imageio.ImageReadParam;
 import javax.imageio.ImageReader;
+import javax.imageio.metadata.IIOMetadata;
 import javax.imageio.stream.ImageInputStream;
 import java.awt.*;
 import java.awt.image.BufferedImage;
@@ -128,7 +129,7 @@ public class ImageThumbnailer {
             // Try to get orientation from ImageReader metadata first
             ImageReaderUtils.Orientation orientation = null;
             try {
-                javax.imageio.metadata.IIOMetadata metadata = reader.getImageMetadata(0);
+                IIOMetadata metadata = reader.getImageMetadata(0);
                 orientation = ImageReaderUtils.findImageOrientation(metadata);
             } catch (Exception e) {
                 log.debug("Could not read orientation from ImageReader metadata", e);
