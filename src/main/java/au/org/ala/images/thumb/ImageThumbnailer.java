@@ -15,6 +15,7 @@ import org.slf4j.LoggerFactory;
 import javax.imageio.ImageIO;
 import javax.imageio.ImageReadParam;
 import javax.imageio.ImageReader;
+import javax.imageio.stream.ImageInputStream;
 import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.Closeable;
@@ -58,7 +59,7 @@ public class ImageThumbnailer {
 
         // Open stream once and create ImageReader
         try (InputStream is = imageBytes.openBufferedStream()) {
-            javax.imageio.stream.ImageInputStream iis = ImageIO.createImageInputStream(is);
+            ImageInputStream iis = ImageIO.createImageInputStream(is);
             if (iis == null) {
                 log.error("Failed to create ImageInputStream");
                 return results;
@@ -104,7 +105,7 @@ public class ImageThumbnailer {
             }
             is.mark(ImageReaderUtils.METADATA_BUFFER_SIZE);
 
-            javax.imageio.stream.ImageInputStream iis = ImageIO.createImageInputStream(is);
+            ImageInputStream iis = ImageIO.createImageInputStream(is);
             if (iis == null) {
                 log.error("Failed to create ImageInputStream");
                 return results;
