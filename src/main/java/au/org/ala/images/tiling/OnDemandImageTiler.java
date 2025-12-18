@@ -1,6 +1,7 @@
 package au.org.ala.images.tiling;
 
 import au.org.ala.images.util.DefaultImageReaderSelectionStrategy;
+import com.google.common.io.ByteSink;
 import org.apache.commons.io.IOUtils;
 import org.imgscalr.Scalr;
 import org.slf4j.Logger;
@@ -15,6 +16,7 @@ import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.Iterator;
 
 /**
@@ -55,34 +57,33 @@ public class OnDemandImageTiler {
     }
 
     /**
-     * Generate a single tile at the specified coordinates.
+     * Generate a single tile at the specified coordinates with detailed result status.
      *
      * @param imageInputStream Input stream for the source image
      * @param level Zoom level (0 = most zoomed out, higher = more zoomed in)
      * @param x Tile X coordinate at this zoom level (column)
      * @param y Tile Y coordinate at this zoom level (row)
-     * @return BufferedImage containing the tile, or null if coordinates are out of bounds
-     * @throws IOException If image reading fails
+     * @return TileGenerationResult containing the tile or failure reason
      */
-    public BufferedImage generateTile(InputStream imageInputStream, int level, int x, int y) throws IOException {
+    public TileGenerationResult generateTile(InputStream imageInputStream, int level, int x, int y) {
         long startTime = System.nanoTime();
 
         try (ImageInputStream iis = ImageIO.createImageInputStream(imageInputStream)) {
             if (iis == null) {
                 IOUtils.consume(imageInputStream);
-                throw new IOException("Failed to create ImageInputStream");
+                return TileGenerationResult.notAnImage();
             }
 
             Iterator<ImageReader> readers = ImageIO.getImageReaders(iis);
             if (!readers.hasNext()) {
                 IOUtils.consume(imageInputStream);
-                throw new IOException("No image readers for image");
+                return TileGenerationResult.notAnImage();
             }
 
             ImageReader reader = DefaultImageReaderSelectionStrategy.INSTANCE.selectImageReader(readers);
             if (reader == null) {
                 IOUtils.consume(imageInputStream);
-                throw new IOException("No suitable image reader selected");
+                return TileGenerationResult.noImageReader();
             }
 
             try {
@@ -98,7 +99,7 @@ public class OnDemandImageTiler {
                 // Validate level
                 if (level < 0 || level >= pyramid.length) {
                     log.warn("Invalid level {} (valid range: 0-{})", level, pyramid.length - 1);
-                    return null;
+                    return TileGenerationResult.invalidLevel(level, pyramid.length);
                 }
 
                 int subsample = pyramid[level];
@@ -115,7 +116,7 @@ public class OnDemandImageTiler {
                 if (x < 0 || x >= tilesX || y < 0 || y >= tilesY) {
                     log.warn("Tile coordinates ({},{}) out of bounds for level {} (valid: 0-{}, 0-{})",
                             x, y, level, tilesX - 1, tilesY - 1);
-                    return null;
+                    return TileGenerationResult.outOfBounds(level, x, y, tilesX, tilesY);
                 }
 
                 BufferedImage tile = generateTileInternal(reader, imageWidth, imageHeight, subsample, x, y);
@@ -124,11 +125,20 @@ public class OnDemandImageTiler {
                 log.debug("Generated tile ({},{}) at level {} in {} ms",
                         x, y, level, (endTime - startTime) / 1_000_000);
 
-                return tile;
+                return TileGenerationResult.success(tile);
 
+            } catch (IOException e) {
+                log.error("I/O error reading image for tile generation", e);
+                return TileGenerationResult.ioError(e.getMessage());
+            } catch (Exception e) {
+                log.error("Unexpected error during tile generation", e);
+                return TileGenerationResult.internalError(e.getMessage());
             } finally {
                 reader.dispose();
             }
+        } catch (IOException e) {
+            log.error("Failed to create ImageInputStream", e);
+            return TileGenerationResult.ioError(e.getMessage());
         }
     }
 
@@ -141,37 +151,44 @@ public class OnDemandImageTiler {
      * @param level Zoom level (0 = most zoomed out, higher = more zoomed in)
      * @param x Tile X coordinate at this zoom level (column)
      * @param y Tile Y coordinate at this zoom level (row)
-     * @throws IOException If image reading or tile writing fails
-     * @throws IllegalArgumentException If coordinates are out of bounds
+     * @return TileGenerationResult indicating success or failure reason
      */
-    public void generateTile(InputStream imageInputStream, TilerSink tilerSink, int level, int x, int y) throws IOException {
+    public TileGenerationResult generateTile(InputStream imageInputStream, TilerSink tilerSink,
+                                                       int level, int x, int y) {
         // Generate the tile
-        BufferedImage tile = generateTile(imageInputStream, level, x, y);
+        TileGenerationResult result = generateTile(imageInputStream, level, x, y);
 
-        if (tile == null) {
-            throw new IllegalArgumentException(String.format(
-                "Failed to generate tile at level %d, coordinates (%d, %d) - coordinates may be out of bounds",
-                level, x, y));
+        if (!result.isSuccess()) {
+            return result;
         }
+
+        BufferedImage tile = result.getTile();
 
         try {
             // Write to sink
             TilerSink.LevelSink levelSink = tilerSink.getLevelSink(level);
             TilerSink.ColumnSink columnSink = levelSink.getColumnSink(x, 0, 1);
-            com.google.common.io.ByteSink byteSink = columnSink.getTileSink(y);
+            ByteSink byteSink = columnSink.getTileSink(y);
 
             // Write the tile
-            try (java.io.OutputStream os = byteSink.openStream()) {
+            try (OutputStream os = byteSink.openStream()) {
                 if (tileFormat == TileFormat.PNG) {
                     ImageIO.write(tile, "png", os);
                 } else {
                     ImageIO.write(tile, "jpg", os);
                 }
             }
+
+            return TileGenerationResult.success(tile);
+
+        } catch (IOException e) {
+            log.error("Failed to write tile to sink", e);
+            return TileGenerationResult.ioError("Failed to write tile: " + e.getMessage());
         } finally {
             tile.flush();
         }
     }
+
 
     /**
      * Internal method to generate a single tile using subsampling and region reading.
@@ -184,17 +201,32 @@ public class OnDemandImageTiler {
      */
     private BufferedImage generateTileInternal(ImageReader reader, int imageWidth, int imageHeight,
                                               int subsample, int tileX, int tileY) throws IOException {
-        // Calculate tile position at the target level
+        int subsampledImageWidth;
+        if (imageWidth % subsample == 0) {
+            subsampledImageWidth = imageWidth / subsample;
+        } else {
+            subsampledImageWidth = (int) Math.ceil((double) imageWidth / subsample);
+        }
+        int subsampledImageHeight;
+        if (imageHeight % subsample == 0) {
+            subsampledImageHeight = imageHeight / subsample;
+        } else {
+            subsampledImageHeight = (int) Math.ceil((double) imageHeight / subsample);
+        }
+
+        int subsampledTileSize = tileSize * subsample;
+
+        // Calculate tile position at the source level
         int tileLeftAtLevel = tileX * tileSize;
-        int tileTopAtLevel = tileY * tileSize;
-        int tileRightAtLevel = Math.min(tileLeftAtLevel + tileSize, (int) Math.ceil((double) imageWidth / subsample));
-        int tileBottomAtLevel = Math.min(tileTopAtLevel + tileSize, (int) Math.ceil((double) imageHeight / subsample));
+        int tileTopAtLevel = Math.max(0, subsampledImageHeight - (tileY+1) * tileSize);
+        int tileRightAtLevel = Math.min(tileLeftAtLevel + tileSize, subsampledImageWidth);
+        int tileBottomAtLevel = subsampledImageHeight - tileY * tileSize;
 
         // Calculate source region in ORIGINAL image coordinates
         int srcX = tileLeftAtLevel * subsample;
         int srcY = tileTopAtLevel * subsample;
         int srcWidth = Math.min((tileRightAtLevel - tileLeftAtLevel) * subsample, imageWidth - srcX);
-        int srcHeight = Math.min((tileBottomAtLevel - tileTopAtLevel) * subsample, imageHeight - srcY);
+        int srcHeight = (tileBottomAtLevel - tileTopAtLevel) * subsample; // TODO Math.min((tileBottomAtLevel - tileTopAtLevel) * subsample, imageHeight - srcY);
 
         log.debug("Reading region: srcX={}, srcY={}, srcWidth={}, srcHeight={}, subsample={}",
                 srcX, srcY, srcWidth, srcHeight, subsample);
@@ -234,7 +266,7 @@ public class OnDemandImageTiler {
             }
 
             // Draw the tile content
-            g.drawImage(resized, 0, 0, null);
+            g.drawImage(resized, 0, tileSize - targetHeight, null);
 
         } finally {
             g.dispose();

@@ -15,6 +15,7 @@ import javax.imageio.spi.IIORegistry;
 import javax.imageio.stream.ImageInputStream;
 import java.awt.*;
 import java.awt.image.BufferedImage;
+import java.awt.image.RasterFormatException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -292,8 +293,11 @@ public class ImageTiler5 implements IImageTiler {
         int cols = (int) Math.ceil((double) image.getWidth() / _tileSize);
         int rows = (int) Math.ceil((double) image.getHeight() / _tileSize);
 
+        int imageHeight = image.getHeight();
+        int imageWidth = image.getWidth();
+
         log.debug("splitAndWriteTilesImmediately: {}x{} image -> {}x{} tiles (parallel generation + streaming writes)",
-                  image.getWidth(), image.getHeight(), cols, rows);
+                  imageWidth, imageHeight, cols, rows);
 
         // Generate tiles on levelThreadPool, stream writes to ioThreadPool
         List<CompletableFuture<Void>> allFutures = new ArrayList<>(cols * rows);
@@ -302,15 +306,24 @@ public class ImageTiler5 implements IImageTiler {
             final int finalCol = col;
             TilerSink.ColumnSink columnSink = levelSink.getColumnSink(finalCol, 0, 1);
 
-            for (int row = 0; row < rows; row++) {
+            for (int row = rows - 1; row >= 0; row--) {
                 final int finalRow = row;
 
                 // Generate tile on levelThreadPool
                 CompletableFuture<TileGenerationResult> tileGeneration = CompletableFuture.supplyAsync(() -> {
                     int x = finalCol * _tileSize;
-                    int y = finalRow * _tileSize;
-                    int tw = Math.min(_tileSize, image.getWidth() - x);
-                    int th = Math.min(_tileSize, image.getHeight() - y);
+//                    int y = finalRow * _tileSize;
+                    int tw = Math.min(_tileSize, imageWidth - x);
+//                    int th = Math.min(_tileSize, image.getHeight() - y);
+                    int th;
+                    int y;
+                    if ((finalRow + 1) * _tileSize > imageHeight) {
+                        y = 0;
+                        th = imageHeight - (finalRow * _tileSize);
+                    } else {
+                        y = imageHeight - (finalRow + 1) * _tileSize;
+                        th = _tileSize;
+                    }
 
                     BufferedImage tile = null;
                     if (tw > 0 && th > 0) {
@@ -328,7 +341,7 @@ public class ImageTiler5 implements IImageTiler {
                     }
 
                     if (tile != null) {
-                        g.drawImage(tile, 0, 0, null);
+                        g.drawImage(tile, 0, _tileSize - th, null);
                     }
 
                     g.dispose();
@@ -460,7 +473,7 @@ public class ImageTiler5 implements IImageTiler {
                 CompletableFuture<Void> sliceChain = CompletableFuture.completedFuture(null);
 
                 for (int i = 0; i < xs; i++) {
-                    for (int j = 0; j < ys; j++) {
+                    for (int j = ys-1; j >= 0; --j) {
                         final int finalI = i;
                         final int finalJ = j;
                         Point sliceCoords = new Point(i, j);
@@ -473,9 +486,16 @@ public class ImageTiler5 implements IImageTiler {
                                     var params = reader.getDefaultReadParam();
 
                                     int rectWidth = (finalI + 1) * segmentSize > w ? w - (finalI * segmentSize) : segmentSize;
-                                    int rectHeight = (finalJ + 1) * segmentSize > h ? h - (finalJ * segmentSize) : segmentSize;
                                     int rectX = finalI * segmentSize;
-                                    int rectY = finalJ * segmentSize;
+                                    int rectHeight = (finalJ + 1) * segmentSize > h ? h - (finalJ * segmentSize) : segmentSize;
+                                    int rectY = h - (finalJ * segmentSize) - rectHeight;;
+
+                                    // Safety check
+                                    if (rectHeight <= 0) {
+                                        throw new IllegalStateException(String.format(
+                                                "Invalid slice dimensions: p.y=%d, h=%d, rectY=%d, rectHeight=%d, segmentSize=%d",
+                                                finalJ, h, rectY, rectHeight, segmentSize));
+                                    }
 
                                     params.setSourceRegion(new Rectangle(rectX, rectY, rectWidth, rectHeight));
 
@@ -565,18 +585,66 @@ public class ImageTiler5 implements IImageTiler {
         int srcHeight = slice.getHeight();
         int srcWidth = slice.getWidth();
 
-        int height = (int) Math.ceil(((double) srcHeight) / ((double) subsample));
-        int width = (int) Math.ceil(((double) srcWidth) / ((double) subsample));
-        int rows = (int) Math.ceil(((double) height) / ((double) _tileSize));
-        int cols = (int) Math.ceil(((double) width) / ((double) _tileSize));
+        // Calculate tile position based on actual pixel positions
+        int startCol;
+        int startRow;
+        if (SLICE_SIZE % subsample == 0) {
+            int sliceSizeAtLevel = SLICE_SIZE / subsample;
+            if (sliceSizeAtLevel % _tileSize == 0) {
+                int maxTilesPerSliceAtLevel = sliceSizeAtLevel / _tileSize;
+                startCol = sliceCoords.x * maxTilesPerSliceAtLevel;
+                startRow = sliceCoords.y * maxTilesPerSliceAtLevel;
+            } else if (sliceSizeAtLevel < _tileSize) {
+                log.warn("slice size {} at subsample {} is smaller than tile size {}", sliceSizeAtLevel, subsample, _tileSize);
+                startCol = sliceCoords.x;
+                startRow = sliceCoords.y;
+            } else {
+                log.warn("slice size {} at subsample {} is not evenly divisible by tile size {}", sliceSizeAtLevel, subsample, _tileSize);
+                double maxTilesPerSliceAtLevel = (double)sliceSizeAtLevel / (double)_tileSize;
+                startCol = (int)((double)sliceCoords.x * maxTilesPerSliceAtLevel);
+                startRow = (int)((double)sliceCoords.y * maxTilesPerSliceAtLevel);
+
+            }
+        } else {
+            log.warn("slice size {} is not evenly divisible by subsample {}", SLICE_SIZE, subsample);
+            double sliceSizeAtLevel = (double) SLICE_SIZE / (double) subsample;
+            double maxTilesPerSliceAtLevel = sliceSizeAtLevel / (double) _tileSize;
+
+            startCol = (int) ((double) sliceCoords.x * maxTilesPerSliceAtLevel);
+            startRow = (int) ((double) sliceCoords.y * maxTilesPerSliceAtLevel);
+        }
+        int height;
+        if (srcHeight % subsample == 0) {
+            height = srcHeight / subsample;
+        } else {
+            height = (int) Math.ceil(((double) srcHeight) / ((double) subsample));
+        }
+        int width;
+        if (srcWidth % subsample == 0) {
+            width = srcWidth / subsample;
+        } else {
+            width = (int) Math.ceil(((double) srcWidth) / ((double) subsample));
+        }
+        int rows;
+        if (height % _tileSize == 0) {
+            rows = height / _tileSize;
+        } else {
+            rows = (int) Math.ceil(((double) height) / ((double) _tileSize));
+        }
+        int cols;
+        if (width % _tileSize == 0) {
+            cols = width / _tileSize;
+        } else {
+            cols = (int) Math.ceil(((double) width) / ((double) _tileSize));
+        }
 
         BufferedImage resized = Scalr.resize(slice, width, height);
 
         double sliceSizeAtLevel = (double) SLICE_SIZE / (double) subsample;
         double maxTilesPerSliceAtLevel = sliceSizeAtLevel / (double) _tileSize;
 
-        int startCol = (int) ((double) sliceCoords.x * maxTilesPerSliceAtLevel);
-        int startRow = (int) ((double) sliceCoords.y * maxTilesPerSliceAtLevel);
+//        int startCol = (int) ((double) sliceCoords.x * maxTilesPerSliceAtLevel);
+//        int startRow = (int) ((double) sliceCoords.y * maxTilesPerSliceAtLevel);
 
         List<CompletableFuture<Void>> tileWriterFutures = new ArrayList<>(cols*rows);
 
@@ -592,7 +660,7 @@ public class ImageTiler5 implements IImageTiler {
             int tw = Math.min(_tileSize, resized.getWidth() - stripColOffset);
             final int finalTw = tw;
 
-            for (int y = 0; y < rows; y++) {
+            for (int y = rows - 1; y >= 0; --y) {
                 final int finalY = y;
                 int actualRow = startRow + y;
                 ByteSink tileSink = columnSink.getTileSink(actualRow);
@@ -602,13 +670,30 @@ public class ImageTiler5 implements IImageTiler {
                 var tileFuture = CompletableFuture
                     .supplyAsync(() -> {
                         // Generate tile on levelThreadPool
-                        int rowOffset = finalY * _tileSize;
-                        int th = Math.min(_tileSize, resized.getHeight() - rowOffset);
+                        int th;
+                        int rowOffset;
+                        if ((finalY+1) * _tileSize > height) {
+                            th = height - (finalY * _tileSize);
+                            rowOffset = 0;
+                        } else {
+                            rowOffset = height - (finalY+1) * _tileSize;
+                            th = _tileSize;
+                        }
+//                        int rowOffset = finalY * _tileSize;
+//                        int th = Math.min(_tileSize, resized.getHeight() - rowOffset);
 
                         BufferedImage tile = null;
                         if (finalTw > 0 && th > 0) {
                             synchronized (resized) {
-                                tile = resized.getSubimage(stripColOffset, rowOffset, finalTw, th);
+                                try {
+                                    tile = resized.getSubimage(stripColOffset, rowOffset, finalTw, th);
+                                } catch (RasterFormatException rfe) {
+                                    log.error("RasterFormatException getting subimage for tile {},{} at slice {},{}: stripColOffset={}, rowOffset={}, finalTw={}, th={}, resizedWidth={}, resizedHeight={}",
+                                            actualCol, actualRow, sliceCoords.x, sliceCoords.y,
+                                            stripColOffset, rowOffset, finalTw, th,
+                                            resized.getWidth(), resized.getHeight());
+                                    throw rfe;
+                                }
                             }
                         }
 
@@ -621,7 +706,7 @@ public class ImageTiler5 implements IImageTiler {
                         }
 
                         if (tile != null) {
-                            g.drawImage(tile, 0, 0, null);
+                            g.drawImage(tile, 0, _tileSize - th, null);
                         }
 
                         g.dispose();

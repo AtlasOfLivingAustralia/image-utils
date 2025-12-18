@@ -2,6 +2,7 @@ package au.org.ala.images.tiling;
 
 import au.org.ala.images.TestBase;
 import org.apache.commons.io.FileUtils;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import java.io.File;
@@ -15,6 +16,7 @@ import static org.junit.Assert.*;
 public class ImageTiler5Test extends TestBase {
 
     @Test
+    @Ignore("Takes a long time and uses significant resources - run manually as needed")
     public void testLargeImageWithStreamingArchitecture() throws Exception {
         String filename = "large_test_20000x20000.jpg";
         URL url = ImageTiler5Test.class.getResource(String.format("/images/%s", filename));
